@@ -3,8 +3,6 @@ package com.example.phoneinfo
 import android.Manifest
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -21,15 +19,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.example.phoneinfo.ui.screens.AppsScreen
+import com.example.phoneinfo.ui.screens.DetailScreen
+import com.example.phoneinfo.ui.screens.HomeScreen
+import com.example.phoneinfo.ui.screens.SpeedTestScreen
 import com.example.phoneinfo.ui.theme.AppBackground
-import com.example.phoneinfo.ui.theme.BgGradientEnd
-import com.example.phoneinfo.ui.theme.BgGradientMiddle
-import com.example.phoneinfo.ui.theme.BgGradientStart
 import com.example.phoneinfo.ui.theme.PhoneInfoTheme
 
 class MainActivity : ComponentActivity() {
@@ -68,7 +66,8 @@ class MainActivity : ComponentActivity() {
             arrayOf(
                 Manifest.permission.ACCESS_FINE_LOCATION,
                 Manifest.permission.READ_PHONE_STATE,
-                Manifest.permission.READ_PHONE_NUMBERS
+                Manifest.permission.READ_PHONE_NUMBERS,
+                Manifest.permission.CAMERA
             )
         )
 
@@ -91,8 +90,8 @@ class MainActivity : ComponentActivity() {
                             ) + fadeIn(animationSpec = tween(400))
                         },
                         exitTransition = {
-                            if (targetState.destination.route == "speedTest") {
-                                // Keep DetailScreen still and slightly fade it when SpeedTest slides up
+                            if (targetState.destination.route == "speedTest" || targetState.destination.route == "apps") {
+                                // Keep DetailScreen still and slightly fade it when SpeedTest or Apps slides up
                                 fadeOut(animationSpec = tween(400, delayMillis = 100))
                             } else {
                                 slideOutHorizontally(
@@ -102,8 +101,8 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         popEnterTransition = {
-                            if (initialState.destination.route == "speedTest") {
-                                // Fade DetailScreen back in when SpeedTest slides down
+                            if (initialState.destination.route == "speedTest" || initialState.destination.route == "apps") {
+                                // Fade DetailScreen back in when SpeedTest or Apps slides down
                                 fadeIn(animationSpec = tween(400))
                             } else {
                                 slideInHorizontally(
@@ -131,8 +130,42 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onNavigateToSpeedTest = {
                                     navController.navigate("speedTest")
+                                },
+                                onNavigateToApps = {
+                                    navController.navigate("apps")
                                 }
                             )
+                        }
+                        composable(
+                            "apps",
+                            enterTransition = {
+                                slideInVertically(
+                                    initialOffsetY = { fullHeight -> fullHeight },
+                                    animationSpec = tween(400)
+                                ) + fadeIn(animationSpec = tween(400))
+                            },
+                            exitTransition = {
+                                slideOutVertically(
+                                    targetOffsetY = { fullHeight -> fullHeight },
+                                    animationSpec = tween(400)
+                                ) + fadeOut(animationSpec = tween(400))
+                            },
+                            popEnterTransition = {
+                                slideInVertically(
+                                    initialOffsetY = { fullHeight -> fullHeight },
+                                    animationSpec = tween(400)
+                                ) + fadeIn(animationSpec = tween(400))
+                            },
+                            popExitTransition = {
+                                slideOutVertically(
+                                    targetOffsetY = { fullHeight -> fullHeight },
+                                    animationSpec = tween(400)
+                                ) + fadeOut(animationSpec = tween(400))
+                            }
+                        ) {
+                            AppsScreen(onNavigateBack = {
+                                navController.popBackStack()
+                            })
                         }
                         composable(
                             "speedTest",

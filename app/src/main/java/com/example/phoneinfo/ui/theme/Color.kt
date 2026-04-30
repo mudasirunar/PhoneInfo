@@ -21,6 +21,9 @@ val AccentPurple = Color(0xFFB026FF) // Neon Purple
 val AccentPink = Color(0xFFFF007F) // Neon Pink
 val AccentGreen = Color(0xFF00FF66) // Neon Green
 val AccentOrange = Color(0xFFFF6A00)
+val AccentBlue = Color(0xFF3D8BFF)    // Hardware / Bluetooth
+val AccentYellow = Color(0xFFFFD600)  // Camera / GPU
+val AccentTeal = Color(0xFF1DE9B6)    // Memory / Apps
 
 // Text Colors
 val TextPrimary = Color(0xFFFFFFFF)
