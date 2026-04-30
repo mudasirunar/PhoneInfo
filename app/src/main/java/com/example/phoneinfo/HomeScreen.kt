@@ -1,13 +1,15 @@
 package com.example.phoneinfo
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Divider
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -19,10 +21,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.phoneinfo.PhoneInfoViewModel
+import com.example.phoneinfo.ui.theme.*
 
 @Composable
 fun HomeScreen(
@@ -33,19 +36,11 @@ fun HomeScreen(
 ) {
     val deviceInfo by phoneInfoViewModel.deviceInfo.collectAsState()
 
-    // A beautiful gradient background
-    val backgroundBrush = Brush.verticalGradient(
-        colors = listOf(
-            Color(0xFF2C3E50),
-            Color(0xFF4CA1AF)
-        )
-    )
-
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(backgroundBrush)
-            .padding(16.dp),
+            .background(Color.Transparent)
+            .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -53,140 +48,230 @@ fun HomeScreen(
             verticalArrangement = Arrangement.SpaceBetween,
             modifier = Modifier.fillMaxHeight()
         ) {
-            // Title
-            Text(
-                text = "Device Overview",
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-                modifier = Modifier.padding(top = 64.dp)
-            )
-
-            // Info Section
-            InfoCard(deviceInfo = deviceInfo, viewModel = phoneInfoViewModel)
-
-            // Button to navigate
-            Button(
-                onClick = onNavigateToDetails,
-                shape = RoundedCornerShape(50), // Makes it pill-shaped
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.White.copy(alpha = 0.3f)
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 32.dp, start = 32.dp, end = 32.dp)
+            // Header Section
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(top = 48.dp)
             ) {
                 Text(
-                    text = "See Advanced Info",
-                    color = Color.White,
-                    fontSize = 16.sp,
-                    modifier = Modifier.padding(8.dp)
+                    text = "System Monitor",
+                    fontSize = 36.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = TextPrimary,
+                    letterSpacing = 1.sp
                 )
+                Text(
+                    text = "Real-time diagnostics",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = AccentCyan,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+
+            // Central Glass Card
+            GlassmorphicCard {
+                Column(modifier = Modifier.padding(24.dp)) {
+                    // Device Name Header
+                    Text(
+                        text = deviceInfo.deviceName,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        modifier = Modifier.padding(bottom = 24.dp)
+                    )
+
+                    // RAM Section
+                    val usedRamFormatted = phoneInfoViewModel.formatBytes(deviceInfo.usedRam)
+                    val totalRamFormatted = phoneInfoViewModel.formatBytes(deviceInfo.totalRam)
+                    val ramPercentage = if (deviceInfo.totalRam > 0) deviceInfo.usedRam.toFloat() / deviceInfo.totalRam.toFloat() else 0f
+                    
+                    MetricRow(
+                        title = "RAM",
+                        value = "$usedRamFormatted / $totalRamFormatted",
+                        percentage = ramPercentage,
+                        accentColor = AccentPurple,
+                        icon = Icons.Default.Memory
+                    )
+
+                    Spacer(modifier = Modifier.height(24.dp))
+                    
+                    HorizontalDivider(color = GlassBorder, thickness = 1.dp)
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    // Internal Storage Section
+                    deviceInfo.internalStorage?.let {
+                        val usedPercentage = if (it.total > 0) it.used.toFloat() / it.total.toFloat() else 0f
+                        MetricRow(
+                            title = "Internal Storage",
+                            value = "${phoneInfoViewModel.formatBytes(it.used)} / ${phoneInfoViewModel.formatBytes(it.total)}",
+                            percentage = usedPercentage,
+                            accentColor = AccentCyan,
+                            icon = Icons.Default.Storage
+                        )
+                    }
+                    
+                    deviceInfo.externalStorage?.let {
+                        Spacer(modifier = Modifier.height(24.dp))
+                        HorizontalDivider(color = GlassBorder, thickness = 1.dp)
+                        Spacer(modifier = Modifier.height(24.dp))
+                        
+                        val usedPercentage = if (it.total > 0) it.used.toFloat() / it.total.toFloat() else 0f
+                        MetricRow(
+                            title = "SD Card",
+                            value = "${phoneInfoViewModel.formatBytes(it.used)} / ${phoneInfoViewModel.formatBytes(it.total)}",
+                            percentage = usedPercentage,
+                            accentColor = AccentGreen,
+                            icon = Icons.Default.Storage
+                        )
+                    }
+                }
+            }
+
+            Button(
+                onClick = onNavigateToDetails,
+                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 32.dp)
+                    .height(64.dp)
+
+                    .clip(RoundedCornerShape(32.dp))
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                GlassBackgroundHighlight,
+                                GlassBackground
+                            )
+                        )
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = GlassBorder,
+                        shape = RoundedCornerShape(32.dp)
+                    )
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "Advanced Analytics",
+                        color = TextPrimary,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = "Forward",
+                        tint = TextPrimary
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-fun InfoCard(deviceInfo: DeviceInfo, viewModel: PhoneInfoViewModel) {
-    // This creates the "glassmorphism" effect
-    val glassBrush = Brush.linearGradient(
-        colors = listOf(
-            Color.White.copy(alpha = 0.3f),
-            Color.White.copy(alpha = 0.1f)
-        )
-    )
-
-    Column(
+fun GlassmorphicCard(content: @Composable () -> Unit) {
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(glassBrush)
-            .padding(24.dp)
+            .clip(RoundedCornerShape(32.dp))
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(
+                        GlassBackgroundHighlight,
+                        GlassBackground
+                    )
+                )
+            )
+            .border(
+                width = 1.dp,
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        GlassBorder,
+                        Color.Transparent
+                    )
+                ),
+                shape = RoundedCornerShape(32.dp)
+            )
     ) {
-        // --- Device Name ---
-        InfoRow("Device Name", deviceInfo.deviceName)
-        InfoDivider()
-
-        // --- RAM Usage ---
-        val usedRamFormatted = viewModel.formatBytes(deviceInfo.usedRam)
-        val totalRamFormatted = viewModel.formatBytes(deviceInfo.totalRam)
-        InfoRow("RAM Usage", "$usedRamFormatted / $totalRamFormatted")
-        InfoDivider()
-
-        // --- Storage ---
-        deviceInfo.internalStorage?.let {
-            StorageInfo(
-                label = "Internal Storage",
-                usedStorage = it.used,
-                totalStorage = it.total,
-                formatBytes = viewModel::formatBytes
-            )
-        }
-
-        deviceInfo.externalStorage?.let {
-            InfoDivider()
-            StorageInfo(
-                label = "SD Card",
-                usedStorage = it.used,
-                totalStorage = it.total,
-                formatBytes = viewModel::formatBytes
-            )
-        }
+        content()
     }
 }
 
 @Composable
-fun StorageInfo(label: String, usedStorage: Long, totalStorage: Long, formatBytes: (Long) -> String) {
-    val usedPercentage = if (totalStorage > 0) usedStorage.toFloat() / totalStorage.toFloat() else 0f
-    val usedStorageFormatted = formatBytes(usedStorage)
-    val totalStorageFormatted = formatBytes(totalStorage)
-
+fun MetricRow(
+    title: String,
+    value: String,
+    percentage: Float,
+    accentColor: Color,
+    icon: androidx.compose.ui.graphics.vector.ImageVector
+) {
     Column {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(text = label, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Light)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(accentColor.copy(alpha = 0.2f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = title,
+                        tint = accentColor,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Text(
+                    text = title,
+                    color = TextSecondary,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
             Text(
-                text = "$usedStorageFormatted / $totalStorageFormatted",
-                color = Color.White,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold
+                text = value,
+                color = TextPrimary,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
             )
         }
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(16.dp))
         LinearProgressIndicator(
-            progress = { usedPercentage },
+            progress = { percentage },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(8.dp)
                 .clip(RoundedCornerShape(4.dp)),
-            color = Color.White,
-            trackColor = Color.White.copy(alpha = 0.3f),
+            color = accentColor,
+            trackColor = GlassBackgroundHighlight,
             strokeCap = StrokeCap.Round,
         )
     }
 }
 
-@Composable
-fun InfoRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(text = label, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Light)
-        Text(text = value, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
 
+@Preview(showBackground = true)
 @Composable
-fun InfoDivider() {
-    Divider(
-        color = Color.White.copy(alpha = 0.3f),
-        thickness = 1.dp,
-        modifier = Modifier.padding(vertical = 16.dp)
-    )
+fun HomeScreenPreview(){
+    PhoneInfoTheme {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(AppBackground)
+        ) {
+            HomeScreen(onNavigateToDetails = {})
+        }
+    }
 }

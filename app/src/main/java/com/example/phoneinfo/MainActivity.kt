@@ -1,19 +1,35 @@
 package com.example.phoneinfo
 
 import android.Manifest
+import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.example.phoneinfo.ui.theme.AppBackground
+import com.example.phoneinfo.ui.theme.BgGradientEnd
+import com.example.phoneinfo.ui.theme.BgGradientMiddle
+import com.example.phoneinfo.ui.theme.BgGradientStart
 import com.example.phoneinfo.ui.theme.PhoneInfoTheme
 
 class MainActivity : ComponentActivity() {
@@ -27,7 +43,25 @@ class MainActivity : ComponentActivity() {
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
+
+        val startTime = System.currentTimeMillis()
+        val minimumDuration = 1800L
+
+        splashScreen.setKeepOnScreenCondition {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+             val elapsedTime = System.currentTimeMillis() - startTime
+             elapsedTime < minimumDuration
+            } else {
+                false
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            splashScreen.setOnExitAnimationListener { provider ->
+                provider.remove()
+            }
+        }
 
         // Request all necessary permissions on startup
         requestMultiplePermissionsLauncher.launch(
@@ -41,19 +75,93 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             PhoneInfoTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(AppBackground)
                 ) {
                     val navController = rememberNavController()
-                    NavHost(navController = navController, startDestination = "home") {
+                    NavHost(
+                        navController = navController,
+                        startDestination = "home",
+                        enterTransition = {
+                            slideInHorizontally(
+                                initialOffsetX = { fullWidth -> fullWidth },
+                                animationSpec = tween(400)
+                            ) + fadeIn(animationSpec = tween(400))
+                        },
+                        exitTransition = {
+                            if (targetState.destination.route == "speedTest") {
+                                // Keep DetailScreen still and slightly fade it when SpeedTest slides up
+                                fadeOut(animationSpec = tween(400, delayMillis = 100))
+                            } else {
+                                slideOutHorizontally(
+                                    targetOffsetX = { fullWidth -> -fullWidth / 3 },
+                                    animationSpec = tween(400)
+                                ) + fadeOut(animationSpec = tween(400))
+                            }
+                        },
+                        popEnterTransition = {
+                            if (initialState.destination.route == "speedTest") {
+                                // Fade DetailScreen back in when SpeedTest slides down
+                                fadeIn(animationSpec = tween(400))
+                            } else {
+                                slideInHorizontally(
+                                    initialOffsetX = { fullWidth -> -fullWidth / 3 },
+                                    animationSpec = tween(400)
+                                ) + fadeIn(animationSpec = tween(400))
+                            }
+                        },
+                        popExitTransition = {
+                            slideOutHorizontally(
+                                targetOffsetX = { fullWidth -> fullWidth },
+                                animationSpec = tween(400)
+                            ) + fadeOut(animationSpec = tween(400))
+                        }
+                    ) {
                         composable("home") {
                             HomeScreen(onNavigateToDetails = {
                                 navController.navigate("details")
                             })
                         }
                         composable("details") {
-                            DetailScreen(onNavigateBack = {
+                            DetailScreen(
+                                onNavigateBack = {
+                                    navController.popBackStack()
+                                },
+                                onNavigateToSpeedTest = {
+                                    navController.navigate("speedTest")
+                                }
+                            )
+                        }
+                        composable(
+                            "speedTest",
+                            enterTransition = {
+                                slideInVertically(
+                                    initialOffsetY = { fullHeight -> fullHeight },
+                                    animationSpec = tween(400)
+                                ) + fadeIn(animationSpec = tween(400))
+                            },
+                            exitTransition = {
+                                slideOutVertically(
+                                    targetOffsetY = { fullHeight -> fullHeight },
+                                    animationSpec = tween(400)
+                                ) + fadeOut(animationSpec = tween(400))
+                            },
+                            popEnterTransition = {
+                                slideInVertically(
+                                    initialOffsetY = { fullHeight -> fullHeight },
+                                    animationSpec = tween(400)
+                                ) + fadeIn(animationSpec = tween(400))
+                            },
+                            popExitTransition = {
+                                slideOutVertically(
+                                    targetOffsetY = { fullHeight -> fullHeight },
+                                    animationSpec = tween(400)
+                                ) + fadeOut(animationSpec = tween(400))
+                            }
+                        ) {
+                            SpeedTestScreen(onNavigateBack = {
                                 navController.popBackStack()
                             })
                         }

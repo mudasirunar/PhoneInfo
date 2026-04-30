@@ -4,10 +4,21 @@
     <selectionStates>
       <SelectionState runConfigName="app">
         <option name="selectionMode" value="DROPDOWN" />
-        <DropdownSelection timestamp="2025-10-31T22:18:09.424397700Z">
+        <DropdownSelection timestamp="2026-04-29T22:05:53.178395Z">
           <Target type="DEFAULT_BOOT">
             <handle>
-              <DeviceId pluginId="PhysicalDevice" identifier="serial=KF6PNFLRS44DNNGI" />
+              <DeviceId pluginId="LocalEmulator" identifier="path=C:\Users\Tesla Laptops\.android\avd\Pixel_7.avd" />
+            </handle>
+          </Target>
+        </DropdownSelection>
+        <DialogSelection />
+      </SelectionState>
+      <SelectionState runConfigName="HomeScreenPreview">
+        <option name="selectionMode" value="DROPDOWN" />
+        <DropdownSelection timestamp="2026-04-29T22:05:53.178395Z">
+          <Target type="DEFAULT_BOOT">
+            <handle>
+              <DeviceId pluginId="LocalEmulator" identifier="path=C:\Users\Tesla Laptops\.android\avd\Pixel_7.avd" />
             </handle>
           </Target>
         </DropdownSelection>

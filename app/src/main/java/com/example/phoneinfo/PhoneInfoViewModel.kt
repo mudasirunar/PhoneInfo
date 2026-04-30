@@ -299,16 +299,36 @@ class PhoneInfoViewModel(private val context: Context) : ViewModel() {
     }
 
     private fun getCpuInfo(): String {
+        // Try Build.SOC_MODEL first (Android 12+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val socModel = Build.SOC_MODEL
+            if (!socModel.isNullOrBlank() && socModel != Build.UNKNOWN) {
+                return socModel
+            }
+        }
+
         return try {
             val process = Runtime.getRuntime().exec("cat /proc/cpuinfo")
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             var line: String?
+            var hardwareName = "N/A"
             while (reader.readLine().also { line = it } != null) {
-                if (line!!.contains("Hardware")) {
-                    return line!!.split(":")[1].trim()
+                if (line!!.startsWith("Hardware", ignoreCase = true)) {
+                    hardwareName = line!!.substringAfter(":").trim()
+                    break
                 }
             }
-            "N/A"
+            reader.close()
+            process.waitFor()
+            
+            if (hardwareName == "N/A" || hardwareName.isBlank()) {
+                val hardware = Build.HARDWARE
+                if (!hardware.isNullOrBlank() && hardware != Build.UNKNOWN) {
+                    hardwareName = hardware
+                }
+            }
+            
+            hardwareName
         } catch (e: Exception) {
             e.printStackTrace()
             "N/A"
