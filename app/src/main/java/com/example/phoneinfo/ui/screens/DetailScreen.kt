@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -18,6 +19,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -103,7 +105,7 @@ fun DetailScreen(
                 DetailGlassCard(title = "Overview", icon = Icons.Default.Memory, accentColor = AccentPurple) {
                     DetailInfoRow("Device Name", deviceInfo.deviceName)
                     DetailInfoRow("Android Version", deviceInfo.androidVersion)
-                    DetailInfoRow("RAM Usage", "${phoneInfoViewModel.formatBytes(deviceInfo.usedRam)} / ${phoneInfoViewModel.formatBytes(deviceInfo.totalRam)}")
+                    DetailInfoRow("RAM", "${phoneInfoViewModel.formatBytes(deviceInfo.usedRam)} / ${phoneInfoViewModel.formatBytes(deviceInfo.totalRam)}")
                     deviceInfo.internalStorage?.let {
                         DetailInfoRow("Internal Storage", "${phoneInfoViewModel.formatBytes(it.used)} / ${phoneInfoViewModel.formatBytes(it.total)}")
                     }
@@ -173,7 +175,7 @@ fun DetailScreen(
                             DetailInfoRow("Build Number", deviceInfo.buildNumber)
                             DetailInfoRow("Kernel Version", deviceInfo.kernelVersion)
                             DetailInfoRow("Bootloader", deviceInfo.bootloaderVersion)
-                            DetailInfoRowWrap("Baseband", deviceInfo.basebandVersion)
+                            DetailInfoRow("Baseband", deviceInfo.basebandVersion)
                             DetailInfoRow("Language", deviceInfo.systemLanguage)
                             DetailInfoRow("Timezone", deviceInfo.timezone)
                             DetailInfoRow("Root Access", if (deviceInfo.isRooted) "Yes" else "No", valueColor = if (deviceInfo.isRooted) AccentPink else TextPrimary)
@@ -250,8 +252,8 @@ fun DetailScreen(
                 item {
                     var isCameraExpanded by rememberSaveable { mutableStateOf(false) }
                     DetailGlassCard(
-                        title = "Cameras", 
-                        icon = Icons.Default.CameraAlt, 
+                        title = "Cameras",
+                        icon = Icons.Default.CameraAlt,
                         accentColor = AccentYellow,
                         expandable = true,
                         isExpanded = isCameraExpanded,
@@ -343,7 +345,7 @@ fun DetailScreen(
                             DetailInfoRow("Country ISO", simInfo.countryIso)
                             
                             simInfo.phoneNumber?.let { number ->
-                                var isNumberVisible by remember { mutableStateOf(false) }
+                                var isNumberVisible by rememberSaveable { mutableStateOf(false) }
 
                                 Row(
                                     modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
@@ -466,7 +468,7 @@ fun DetailScreen(
                     customActionText = "View Apps",
                     onExpandToggle = onNavigateToApps
                 ) {
-                    DetailInfoRow("Total Installed Apps", "${deviceInfo.totalApps}")
+                    DetailInfoRow("Total Apps", "${deviceInfo.totalApps}")
                     DetailInfoRow("System Apps", "${deviceInfo.systemApps}")
                     DetailInfoRow("User Apps", "${deviceInfo.userApps}")
                 }
@@ -475,13 +477,41 @@ fun DetailScreen(
             // --- Java VM Section ---
             item {
                 var isJavaExpanded by rememberSaveable { mutableStateOf(false) }
+                var showJavaDialog by remember { mutableStateOf(false) }
+
+                if (showJavaDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showJavaDialog = false },
+                        title = { Text("About Java Runtime", fontWeight = FontWeight.Bold) },
+                        text = {
+                            Text(
+                                "The Java Virtual Machine (VM) executes your Android apps. " +
+                                "The Heap Size indicates how much RAM is currently allocated specifically " +
+                                "to the VM, which impacts how smoothly heavy apps can run before " +
+                                "running out of memory.",
+                                color = TextSecondary
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { showJavaDialog = false }) {
+                                Text("Got it", color = AccentPurple, fontWeight = FontWeight.Bold)
+                            }
+                        },
+                        containerColor = BgGradientMiddle,
+                        titleContentColor = TextPrimary,
+                        shape = RoundedCornerShape(24.dp),
+                        modifier = Modifier.border(1.dp, GlassBorder, RoundedCornerShape(24.dp))
+                    )
+                }
+
                 DetailGlassCard(
                     title = "Java Runtime", 
                     icon = Icons.Default.Code, 
                     accentColor = AccentPurple,
                     expandable = true,
                     isExpanded = isJavaExpanded,
-                    onExpandToggle = { isJavaExpanded = !isJavaExpanded }
+                    onExpandToggle = { isJavaExpanded = !isJavaExpanded },
+                    onInfoClick = { showJavaDialog = true }
                 ) {
                     DetailInfoRow("VM Name", deviceInfo.vmName)
                     DetailInfoRow("VM Version", deviceInfo.vmVersion)
@@ -674,7 +704,7 @@ fun HealthInfoRow(healthStatus: String) {
             },
             confirmButton = {
                 TextButton(onClick = { showDialog = false }) {
-                    Text("Got it", color = AccentCyan, fontWeight = FontWeight.Bold)
+                    Text("Got it", color = AccentGreen, fontWeight = FontWeight.Bold)
                 }
             },
             containerColor = BgGradientMiddle,
@@ -691,19 +721,24 @@ fun HealthInfoRow(healthStatus: String) {
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .clickable { showDialog = true }
-                .padding(end = 8.dp, top = 4.dp, bottom = 4.dp)
+            modifier = Modifier.padding(end = 8.dp, top = 4.dp, bottom = 4.dp)
         ) {
             Text(text = "Health", color = TextSecondary, fontSize = 15.sp)
             Spacer(modifier = Modifier.width(6.dp))
-            Icon(
-                imageVector = Icons.Outlined.Info,
-                contentDescription = "Info about battery health",
-                tint = AccentCyan,
-                modifier = Modifier.size(16.dp)
-            )
+            Box(
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .clickable { showDialog = true }
+                    .padding(4.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Info,
+                    contentDescription = "Info about battery health",
+                    tint = AccentGreen,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
         }
         Text(
             text = healthStatus, 
@@ -723,6 +758,7 @@ fun DetailGlassCard(
     isExpanded: Boolean = false,
     customActionText: String? = null,
     onExpandToggle: () -> Unit = {},
+    onInfoClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     DetailGlassCardBase(
@@ -743,6 +779,7 @@ fun DetailGlassCard(
         isExpanded = isExpanded,
         customActionText = customActionText,
         onExpandToggle = onExpandToggle,
+        onInfoClick = onInfoClick,
         content = content
     )
 }
@@ -756,6 +793,7 @@ fun DetailGlassCard(
     isExpanded: Boolean = false,
     customActionText: String? = null,
     onExpandToggle: () -> Unit = {},
+    onInfoClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     DetailGlassCardBase(
@@ -766,6 +804,7 @@ fun DetailGlassCard(
         isExpanded = isExpanded,
         customActionText = customActionText,
         onExpandToggle = onExpandToggle,
+        onInfoClick = onInfoClick,
         content = content
     )
 }
@@ -779,20 +818,26 @@ private fun DetailGlassCardBase(
     isExpanded: Boolean = false,
     customActionText: String? = null,
     onExpandToggle: () -> Unit = {},
+    onInfoClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val backgroundBrush = remember {
+        Brush.linearGradient(
+            colors = listOf(GlassBackgroundHighlight, GlassBackground)
+        )
+    }
+    val borderBrush = remember {
+        Brush.linearGradient(colors = listOf(GlassBorder, Color.Transparent))
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(GlassBackgroundHighlight, GlassBackground)
-                )
-            )
+            .background(backgroundBrush)
             .border(
                 width = 1.dp,
-                brush = Brush.linearGradient(colors = listOf(GlassBorder, Color.Transparent)),
+                brush = borderBrush,
                 shape = RoundedCornerShape(24.dp)
             )
             .padding(20.dp)
@@ -813,6 +858,23 @@ private fun DetailGlassCardBase(
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.5.sp
                     )
+                    if (onInfoClick != null) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .clickable { onInfoClick() }
+                                .padding(4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Info,
+                                contentDescription = "Info about $title",
+                                tint = accentColor,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
                 }
                 
                 if (expandable) {

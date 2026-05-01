@@ -2,6 +2,7 @@ package com.example.phoneinfo.viewmodel
 
 import android.Manifest
 import android.app.ActivityManager
+import android.app.AppOpsManager
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
@@ -58,62 +59,165 @@ class PhoneInfoViewModel(private val context: Context) : ViewModel() {
 
     private val _deviceInfo = MutableStateFlow(DeviceInfo())
     val deviceInfo = _deviceInfo.asStateFlow()
-
     private val _appDetails = MutableStateFlow<List<AppDetail>>(emptyList())
     val appDetails = _appDetails.asStateFlow()
-
     private val _isLoadingApps = MutableStateFlow(false)
     val isLoadingApps = _isLoadingApps.asStateFlow()
+    private val _allAppsSize = MutableStateFlow(0L)
+    val allAppsSize = _allAppsSize.asStateFlow()
+    private val _installedAppsSize = MutableStateFlow(0L)
+    val installedAppsSize = _installedAppsSize.asStateFlow()
+    private val _systemAppsSize = MutableStateFlow(0L)
+    val systemAppsSize = _systemAppsSize.asStateFlow()
 
-    fun loadApps() {
-        if (_appDetails.value.isNotEmpty()) return
+    private fun updateStorageSizes(appsList: List<AppDetail>) {
+        var all = 0L
+        var installed = 0L
+        var system = 0L
+        for (app in appsList) {
+            val size = app.size.coerceAtLeast(0L)
+            all += size
+            if (app.isSystemApp) {
+                system += size
+            } else {
+                installed += size
+            }
+        }
+        _allAppsSize.value = all
+        _installedAppsSize.value = installed
+        _systemAppsSize.value = system
+    }
+
+    fun loadApps(forceRefresh: Boolean = false) {
+        if (!forceRefresh && (_appDetails.value.isNotEmpty() || _isLoadingApps.value)) return
         viewModelScope.launch(Dispatchers.IO) {
             _isLoadingApps.value = true
             val packageManager = context.packageManager
             val apps = packageManager.getInstalledPackages(0)
             
-            val launchIntent = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
-            val launchablePackages = packageManager.queryIntentActivities(launchIntent, 0).map { it.activityInfo.packageName }.toSet()
+            val systemInstallTime = try {
+                packageManager.getPackageInfo("android", 0).firstInstallTime
+            } catch (e: Exception) {
+                Build.TIME
+            }.coerceAtLeast(Build.TIME)
 
             val appList = mutableListOf<AppDetail>()
             for (packInfo in apps) {
                 val appInfo = packInfo.applicationInfo ?: continue
-                val isSystemApp = (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0 || 
-                                  (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
                 
-                // Filter out test apps
-                if (appInfo.packageName.contains(".test", ignoreCase = true)) continue
-                
-                if (!isSystemApp || launchablePackages.contains(appInfo.packageName)) {
-                    val name = packageManager.getApplicationLabel(appInfo).toString()
-                    val packageName = appInfo.packageName
-                    val versionName = packInfo.versionName ?: "Unknown"
-                    val installTime = packInfo.firstInstallTime
-                    
-                    var size = 0L
-                    try {
-                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                            val storageStatsManager = context.getSystemService(android.content.Context.STORAGE_STATS_SERVICE) as StorageStatsManager
-                            val storageStats = storageStatsManager.queryStatsForUid(StorageManager.UUID_DEFAULT, appInfo.uid)
-                            size = storageStats.appBytes + storageStats.dataBytes + storageStats.cacheBytes
-                        } else {
-                            size = (appInfo.sourceDir?.let { File(it).length() } ?: 0L) + 
-                                   (appInfo.publicSourceDir?.let { File(it).length() } ?: 0L)
-                        }
-                    } catch (e: Exception) {
-                        size = (appInfo.sourceDir?.let { File(it).length() } ?: 0L)
-                    }
+                if (appInfo.packageName.contains("android.auto_generated") ||
+                    appInfo.packageName.contains("android.stub") ||
+                    appInfo.packageName.contains(".test", ignoreCase = true)) continue
 
-                    appList.add(AppDetail(name, packageName, versionName, size, installTime, isSystemApp))
+                val launchIntent = packageManager.getLaunchIntentForPackage(appInfo.packageName)
+                if (launchIntent == null && (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0) {
+                    continue
+                }
+                
+                val isSystemApp = isPreloadedOrSystemApp(packageManager, packInfo, systemInstallTime)
+                
+                val name = packageManager.getApplicationLabel(appInfo).toString()
+                val packageName = appInfo.packageName
+                val versionName = packInfo.versionName ?: "Unknown"
+                var installTime = packInfo.firstInstallTime
+                if (installTime < Build.TIME) {
+                    installTime = Build.TIME
+                }
+                
+                // Quick size fallback initially
+                val size = (appInfo.sourceDir?.let { File(it).length() } ?: 0L) +
+                           (appInfo.publicSourceDir?.let { File(it).length() } ?: 0L)
+
+                appList.add(AppDetail(name, packageName, versionName, size, installTime, isSystemApp, totalSize = -1L, isPermissionDenied = false))
+            }
+            val sortedList = appList.sortedBy { it.name.lowercase(Locale.getDefault()) }
+            _appDetails.value = sortedList
+            updateStorageSizes(sortedList)
+            _isLoadingApps.value = false
+            
+            // Asynchronously fetch accurate sizes to prevent blocking UI
+            fetchAppSizes(sortedList)
+        }
+    }
+
+    private fun isPreloadedOrSystemApp(packageManager: PackageManager, packInfo: android.content.pm.PackageInfo, systemInstallTime: Long): Boolean {
+        val appInfo = packInfo.applicationInfo ?: return false
+        var isSystem = (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0 || 
+                       (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+        
+        if (!isSystem) {
+            if (appInfo.sourceDir != null && !appInfo.sourceDir!!.startsWith("/data/app/")) {
+                isSystem = true
+            } else if (packInfo.firstInstallTime <= systemInstallTime + 180000) { // 3 mins window
+                val installer = try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        packageManager.getInstallSourceInfo(appInfo.packageName).installingPackageName
+                    } else {
+                        @Suppress("DEPRECATION")
+                        packageManager.getInstallerPackageName(appInfo.packageName)
+                    }
+                } catch (e: Exception) { null }
+                
+                if (installer != "com.android.vending") {
+                    isSystem = true
                 }
             }
-            _appDetails.value = appList.sortedBy { it.name.lowercase(Locale.getDefault()) }
-            _isLoadingApps.value = false
+        }
+        return isSystem
+    }
+
+    private fun fetchAppSizes(initialList: List<AppDetail>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            var currentList = initialList.toList()
+            var isAuthError = false
+            for ((index, app) in initialList.withIndex()) {
+                var newAppSize = app.appSize
+                var newDataSize = app.dataSize
+                var newCacheSize = app.cacheSize
+                var newTotalSize = app.totalSize
+
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        val storageStatsManager = context.getSystemService(Context.STORAGE_STATS_SERVICE) as StorageStatsManager
+                        val storageStats = storageStatsManager.queryStatsForPackage(StorageManager.UUID_DEFAULT, app.packageName, android.os.Process.myUserHandle())
+                        newAppSize = storageStats.appBytes
+                        newCacheSize = storageStats.cacheBytes
+                        newDataSize = storageStats.dataBytes - newCacheSize
+
+                        newTotalSize = newAppSize + storageStats.dataBytes
+                    }
+                } catch (e: SecurityException) {
+                    // If we hit a security error, we know the permission is missing
+                    isAuthError = true
+                    break
+                } catch (e: Exception) { /* Handle app not found */ }
+                
+                if (newTotalSize != app.totalSize || newAppSize != app.appSize || newDataSize != app.dataSize || newCacheSize != app.cacheSize) {
+                    currentList = currentList.map { 
+                        if (it.packageName == app.packageName) it.copy(size = newTotalSize, appSize = newAppSize, dataSize = newDataSize, cacheSize = newCacheSize, totalSize = newTotalSize) else it 
+                    }
+                    if (index % 10 == 0) { // Batch updates to avoid overwhelming recompositions
+                        _appDetails.value = currentList
+                        updateStorageSizes(currentList)
+                    }
+                }
+            }
+            if (isAuthError) {
+                // Update all apps to show "Permission Required" status
+                _appDetails.value = currentList.map { it.copy(isPermissionDenied = true) }
+            } else {
+                _appDetails.value = currentList
+                updateStorageSizes(currentList)
+            }
         }
     }
 
     init {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
+            loadStaticDeviceInfo()
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
             while (isActive) {
                 updateDeviceInfo()
                 delay(2000) // Update interval
@@ -121,31 +225,123 @@ class PhoneInfoViewModel(private val context: Context) : ViewModel() {
         }
     }
 
-    private fun updateDeviceInfo() {
-
-        // --- System Info ---
+    private fun loadStaticDeviceInfo() {
         val packageManager = context.packageManager
-        val firstInstallTime = try {
+        var firstInstallTime = try {
             packageManager.getPackageInfo("android", 0).firstInstallTime
         } catch (e: Exception) {
-            0L
+            Build.TIME
         }
+        
+        // If the 'android' package was flashed without a real-time clock, it often defaults to 2009.
+        // We fallback to the ROM's build time, since the device cannot be online before its OS was built.
+        if (firstInstallTime < Build.TIME) {
+            firstInstallTime = Build.TIME
+        }
+
+        val displayMetrics = context.resources.displayMetrics
+        val screenSizeInches = String.format("%.2f", Math.sqrt(Math.pow((displayMetrics.widthPixels / displayMetrics.xdpi).toDouble(), 2.0) + Math.pow((displayMetrics.heightPixels / displayMetrics.ydpi).toDouble(), 2.0)))
+
+        val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        val availableSensors = sensorManager.getSensorList(Sensor.TYPE_ALL).map { cleanSensorName(it.name) }
+
+        val apps = packageManager.getInstalledApplications(0)
+        var systemAppsCount = 0
+        var userAppsCount = 0
+
+        for (app in apps) {
+            // 1. Skip if it's a test package
+            if (app.packageName.contains(".test", ignoreCase = true)) continue
+
+            // 2. Filter out Pixel/Android stubs and auto-generated services
+            if (app.packageName.contains("android.auto_generated") ||
+                app.packageName.contains("android.stub")) continue
+
+            // 3. Filter for launchable apps: If it's a system app but has no drawer icon, don't count it
+            val isSystemApp = (app.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0 ||
+                    (app.flags and android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+
+            val launchIntent = packageManager.getLaunchIntentForPackage(app.packageName)
+            if (isSystemApp && launchIntent == null) {
+                continue
+            }
+
+            // Increment the counts using your existing variables
+            if (!isSystemApp) {
+                userAppsCount++
+            } else {
+                systemAppsCount++
+            }
+        }
+        val totalAppsCount = systemAppsCount + userAppsCount
+
+        val cameraInfos = getCameraInfos()
+
+        _deviceInfo.value = _deviceInfo.value.copy(
+            deviceName = "${Build.MANUFACTURER} ${Build.MODEL}",
+            manufacturer = Build.MANUFACTURER,
+            brand = Build.BRAND,
+            model = Build.MODEL,
+            deviceCodename = Build.DEVICE,
+            board = Build.BOARD,
+            hardwareId = Build.HARDWARE,
+            product = Build.PRODUCT,
+            buildFingerprint = Build.FINGERPRINT,
+            buildId = Build.ID,
+            buildType = Build.TYPE,
+            androidVersion = Build.VERSION.RELEASE,
+            isRooted = isDeviceRooted(),
+            securityPatch = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Build.VERSION.SECURITY_PATCH else "N/A",
+            kernelVersion = System.getProperty("os.version") ?: "N/A",
+            firstInstallTime = firstInstallTime,
+            sdkVersion = Build.VERSION.SDK_INT,
+            buildNumber = Build.DISPLAY,
+            bootloaderVersion = Build.BOOTLOADER,
+            basebandVersion = Build.getRadioVersion() ?: "N/A",
+            systemLanguage = Locale.getDefault().displayLanguage,
+            timezone = TimeZone.getDefault().id,
+            processorName = getCpuInfo(),
+            cpuArchitecture = System.getProperty("os.arch") ?: "N/A",
+            coreCount = Runtime.getRuntime().availableProcessors(),
+            supportedAbis = Build.SUPPORTED_ABIS.joinToString(", "),
+            screenResolution = "${displayMetrics.heightPixels} x ${displayMetrics.widthPixels}",
+            screenDensity = displayMetrics.densityDpi,
+            screenSizeInches = screenSizeInches,
+            sensors = availableSensors,
+            sensorCount = availableSensors.size,
+            totalApps = totalAppsCount,
+            systemApps = systemAppsCount,
+            userApps = userAppsCount,
+            vmName = System.getProperty("java.vm.name") ?: "N/A",
+            vmVersion = System.getProperty("java.vm.version") ?: "N/A",
+            vmMaxHeap = Runtime.getRuntime().maxMemory(),
+            cameraInfos = cameraInfos
+        )
+    }
+
+    private fun updateDeviceInfo() {
 
         // --- Storage (Internal and External) ---
         val internalStatFs = StatFs(Environment.getDataDirectory().path)
-        val totalInternal = internalStatFs.blockCountLong * internalStatFs.blockSizeLong
+        val rawTotalInternal = internalStatFs.blockCountLong * internalStatFs.blockSizeLong
         val freeInternal = internalStatFs.availableBlocksLong * internalStatFs.blockSizeLong
+        
+        val advertisedTotalInternal = getAdvertisedStorage(rawTotalInternal)
+        val usedInternal = advertisedTotalInternal - freeInternal
         val internalStorageInfo =
-            StorageInfo(total = totalInternal, used = totalInternal - freeInternal)
+            StorageInfo(total = advertisedTotalInternal, used = usedInternal)
 
         var externalStorageInfo: StorageInfo? = null
         val externalDirs = ContextCompat.getExternalFilesDirs(context, null)
         if (externalDirs.size > 1 && externalDirs[1] != null && Environment.isExternalStorageRemovable(externalDirs[1])) {
             val sdCardPath = externalDirs[1].path
             val statFs = StatFs(sdCardPath)
-            val totalExternal = statFs.blockCountLong * statFs.blockSizeLong
+            val rawTotalExternal = statFs.blockCountLong * statFs.blockSizeLong
             val freeExternal = statFs.availableBlocksLong * statFs.blockSizeLong
-            externalStorageInfo = StorageInfo(total = totalExternal, used = totalExternal - freeExternal)
+            
+            val advertisedTotalExternal = getAdvertisedStorage(rawTotalExternal)
+            val usedExternal = advertisedTotalExternal - freeExternal
+            externalStorageInfo = StorageInfo(total = advertisedTotalExternal, used = usedExternal)
         }
 
         // --- SIM Info (Dual SIM support) ---
@@ -246,10 +442,6 @@ class PhoneInfoViewModel(private val context: Context) : ViewModel() {
         val orientation = if (configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) "Landscape" else "Portrait"
         val nightMode = if ((configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES) "Yes" else "No"
 
-        // Sensors
-        val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-        val availableSensors = sensorManager.getSensorList(Sensor.TYPE_ALL).map { cleanSensorName(it.name) }
-        
         // Bluetooth
         val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         val bluetoothAdapter = bluetoothManager.adapter
@@ -261,64 +453,12 @@ class PhoneInfoViewModel(private val context: Context) : ViewModel() {
             } else "Permission Denied"
         } catch (e: SecurityException) { "Permission Denied" }
 
-        // Apps
-        val apps = packageManager.getInstalledApplications(0)
-        var systemAppsCount = 0
-        var userAppsCount = 0
-        
-        val launchIntent = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
-        val launchablePackages = packageManager.queryIntentActivities(launchIntent, 0).map { it.activityInfo.packageName }.toSet()
-
-        for (app in apps) {
-            val isSystemApp = (app.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
-            if (!isSystemApp) {
-                userAppsCount++
-            } else if (launchablePackages.contains(app.packageName)) {
-                systemAppsCount++
-            }
-        }
-        val totalAppsCount = systemAppsCount + userAppsCount
-
         // Update State
         _deviceInfo.value = _deviceInfo.value.copy(
-            deviceName = "${Build.MANUFACTURER} ${Build.MODEL}",
             totalRam = memoryInfo.totalMem,
             usedRam = memoryInfo.totalMem - memoryInfo.availMem,
             internalStorage = internalStorageInfo,
             externalStorage = externalStorageInfo,
-
-            // Hardware
-            manufacturer = Build.MANUFACTURER,
-            brand = Build.BRAND,
-            model = Build.MODEL,
-            deviceCodename = Build.DEVICE,
-            board = Build.BOARD,
-            hardwareId = Build.HARDWARE,
-            product = Build.PRODUCT,
-            buildFingerprint = Build.FINGERPRINT,
-            buildId = Build.ID,
-            buildType = Build.TYPE,
-
-            // System Info
-            androidVersion = Build.VERSION.RELEASE,
-            isRooted = isDeviceRooted(),
-            securityPatch = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Build.VERSION.SECURITY_PATCH else "N/A",
-            kernelVersion = System.getProperty("os.version") ?: "N/A",
-            uptime = SystemClock.elapsedRealtime(),
-            firstInstallTime = firstInstallTime,
-            sdkVersion = Build.VERSION.SDK_INT,
-            buildNumber = Build.DISPLAY,
-            bootloaderVersion = Build.BOOTLOADER,
-            basebandVersion = Build.getRadioVersion() ?: "N/A",
-            systemLanguage = Locale.getDefault().displayLanguage,
-            timezone = TimeZone.getDefault().id,
-
-            // CPU
-            processorName = getCpuInfo(),
-            cpuArchitecture = System.getProperty("os.arch") ?: "N/A",
-            coreCount = Runtime.getRuntime().availableProcessors(),
-            coreFrequencies = getCpuFrequencies(),
-            supportedAbis = Build.SUPPORTED_ABIS.joinToString(", "),
 
             // Battery Info
             batteryLevel = batteryLevel,
@@ -330,10 +470,7 @@ class PhoneInfoViewModel(private val context: Context) : ViewModel() {
             chargingSource = chargingSource,
 
             // Display Info
-            screenResolution = "${displayMetrics.heightPixels} x ${displayMetrics.widthPixels}",
-            screenDensity = displayMetrics.densityDpi,
             refreshRate = refreshRate,
-            screenSizeInches = screenSizeInches,
             fontScale = fontScale,
             orientation = orientation,
             nightMode = nightMode,
@@ -355,48 +492,69 @@ class PhoneInfoViewModel(private val context: Context) : ViewModel() {
 
             // Mobile
             simInfos = simInfos,
-
-            // Sensors
-            sensors = availableSensors,
-            sensorCount = availableSensors.size,
             
-            // Thermal
+            // Thermal & Speeds
             cpuTemperature = getCpuTemperature(),
+            coreFrequencies = getCpuCoreSpeeds(),
             
             // Memory
             availableRam = memoryInfo.availMem,
             lowMemoryThreshold = memoryInfo.threshold,
             isLowMemory = memoryInfo.lowMemory,
             
-            // Apps
-            totalApps = totalAppsCount,
-            systemApps = systemAppsCount,
-            userApps = userAppsCount,
-            
             // Java VM
-            vmName = System.getProperty("java.vm.name") ?: "N/A",
-            vmVersion = System.getProperty("java.vm.version") ?: "N/A",
             vmHeapSize = Runtime.getRuntime().totalMemory(),
-            vmMaxHeap = Runtime.getRuntime().maxMemory(),
             vmFreeHeap = Runtime.getRuntime().freeMemory(),
             
-            // Camera
-            cameraInfos = getCameraInfos()
+            // System Time
+            uptime = SystemClock.elapsedRealtime()
         )
     }
 
     // --- New Helper Functions ---
+    private fun getAdvertisedStorage(rawBytes: Long): Long {
+        val gb = 1000L * 1000L * 1000L
+        val tiers = listOf(8L, 16L, 32L, 64L, 128L, 256L, 512L, 1024L, 2048L, 4096L)
+        for (tier in tiers) {
+            val tierBytes = tier * gb
+            if (rawBytes <= tierBytes) {
+                return tierBytes
+            }
+        }
+        return rawBytes
+    }
+
+    private fun getCpuCoreSpeeds(): String {
+        return try {
+            val cores = Runtime.getRuntime().availableProcessors()
+            val freqs = mutableListOf<String>()
+            for (i in 0 until cores) {
+                val freqFile = File("/sys/devices/system/cpu/cpu$i/cpufreq/scaling_cur_freq")
+                if (freqFile.exists()) {
+                    val freq = freqFile.readText().trim().toLongOrNull()
+                    if (freq != null && freq > 0) {
+                        freqs.add(String.format("%.2f GHz", freq / 1000000.0))
+                    } else {
+                        freqs.add("Offline")
+                    }
+                } else {
+                    freqs.add("Offline")
+                }
+            }
+            if (freqs.isEmpty()) return "N/A"
+            
+            // Group them for a cleaner UI (e.g., "4x 1.80 GHz \n 4x 2.40 GHz")
+            val grouped = freqs.groupingBy { it }.eachCount()
+            grouped.entries.joinToString("\n") { "${it.value}x ${it.key}" }
+        } catch (e: Exception) {
+            "N/A"
+        }
+    }
+
     private fun getCpuTemperature(): String {
         return try {
-            val process = Runtime.getRuntime().exec("cat /sys/class/thermal/thermal_zone0/temp")
-            val reader = BufferedReader(InputStreamReader(process.inputStream))
-            val line = reader.readLine()
-            reader.close()
-            process.waitFor()
-            if (line != null) {
-                val temp = line.toFloat() / 1000.0f
-                "%.1f °C".format(temp)
-            } else "N/A"
+            val temp = File("/sys/class/thermal/thermal_zone0/temp").readText().trim().toFloat()
+            "%.1f °C".format(temp / 1000f)
         } catch (e: Exception) {
             "N/A"
         }
@@ -415,19 +573,19 @@ class PhoneInfoViewModel(private val context: Context) : ViewModel() {
                     else -> "Unknown"
                 }
                 val hasFlash = chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
-                
+
                 // Get Focal Lengths
                 val focalLengthsArray = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
                 val focalLengths = focalLengthsArray?.joinToString(", ") { "${it}mm" } ?: "N/A"
-                
+
                 // Get Apertures
                 val aperturesArray = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
                 val apertures = aperturesArray?.joinToString(", ") { "f/$it" } ?: "N/A"
-                
+
                 // Optical Stabilization
                 val oisArray = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION)
                 val hasOis = oisArray?.any { it != CameraCharacteristics.LENS_OPTICAL_STABILIZATION_MODE_OFF } ?: false
-                
+
                 // Simple Megapixel estimation (just array size * something, or active array size)
                 val activeArray = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
                 val megapixels = if (activeArray != null) {
@@ -508,18 +666,14 @@ class PhoneInfoViewModel(private val context: Context) : ViewModel() {
         }
 
         return try {
-            val process = Runtime.getRuntime().exec("cat /proc/cpuinfo")
-            val reader = BufferedReader(InputStreamReader(process.inputStream))
-            var line: String?
+            val cpuinfo = File("/proc/cpuinfo").readText()
             var hardwareName = "N/A"
-            while (reader.readLine().also { line = it } != null) {
-                if (line!!.startsWith("Hardware", ignoreCase = true)) {
-                    hardwareName = line!!.substringAfter(":").trim()
+            for (line in cpuinfo.lines()) {
+                if (line.startsWith("Hardware", ignoreCase = true)) {
+                    hardwareName = line.substringAfter(":").trim()
                     break
                 }
             }
-            reader.close()
-            process.waitFor()
             
             if (hardwareName == "N/A" || hardwareName.isBlank()) {
                 val hardware = Build.HARDWARE
@@ -545,6 +699,24 @@ class PhoneInfoViewModel(private val context: Context) : ViewModel() {
         }
     }
 
+    fun hasUsagePermission(): Boolean {
+        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            appOps.unsafeCheckOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                android.os.Process.myUid(),
+                context.packageName
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            appOps.checkOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                android.os.Process.myUid(),
+                context.packageName
+            )
+        }
+        return mode == AppOpsManager.MODE_ALLOWED
+    }
 
     /**
      * NEW: Helper function to make sensor names more human-readable.
@@ -563,14 +735,7 @@ class PhoneInfoViewModel(private val context: Context) : ViewModel() {
 
     // Helper Functions
     fun formatBytes(bytes: Long): String {
-        val gb = bytes / (1024.0 * 1024.0 * 1024.0)
-        val mb = bytes / (1024.0 * 1024.0)
-        val df = DecimalFormat("#.##")
-        return when {
-            gb >= 1 -> "${df.format(gb)} GB"
-            mb >= 1 -> "${df.format(mb)} MB"
-            else -> "${bytes / 1024} KB"
-        }
+        return Formatter.formatFileSize(context, bytes)
     }
 
     fun formatMillisToUptime(millis: Long): String {
