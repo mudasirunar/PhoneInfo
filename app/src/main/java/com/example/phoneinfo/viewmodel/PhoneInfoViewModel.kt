@@ -108,11 +108,6 @@ class PhoneInfoViewModel(private val context: Context) : ViewModel() {
                 if (appInfo.packageName.contains("android.auto_generated") ||
                     appInfo.packageName.contains("android.stub") ||
                     appInfo.packageName.contains(".test", ignoreCase = true)) continue
-
-                val launchIntent = packageManager.getLaunchIntentForPackage(appInfo.packageName)
-                if (launchIntent == null && (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0) {
-                    continue
-                }
                 
                 val isSystemApp = isPreloadedOrSystemApp(packageManager, packInfo, systemInstallTime)
                 
@@ -125,8 +120,13 @@ class PhoneInfoViewModel(private val context: Context) : ViewModel() {
                 }
                 
                 // Quick size fallback initially
-                val size = (appInfo.sourceDir?.let { File(it).length() } ?: 0L) +
-                           (appInfo.publicSourceDir?.let { File(it).length() } ?: 0L)
+                var size = appInfo.sourceDir?.let { File(it).length() } ?: 0L
+                if (appInfo.publicSourceDir != null && appInfo.publicSourceDir != appInfo.sourceDir) {
+                    size += File(appInfo.publicSourceDir).length()
+                }
+                appInfo.splitSourceDirs?.forEach { splitDir ->
+                    size += File(splitDir).length()
+                }
 
                 appList.add(AppDetail(name, packageName, versionName, size, installTime, isSystemApp, totalSize = -1L, isPermissionDenied = false))
             }
@@ -191,6 +191,10 @@ class PhoneInfoViewModel(private val context: Context) : ViewModel() {
                     isAuthError = true
                     break
                 } catch (e: Exception) { /* Handle app not found */ }
+                
+                if (newTotalSize == -1L) {
+                    newTotalSize = app.size
+                }
                 
                 if (newTotalSize != app.totalSize || newAppSize != app.appSize || newDataSize != app.dataSize || newCacheSize != app.cacheSize) {
                     currentList = currentList.map { 
@@ -260,11 +264,6 @@ class PhoneInfoViewModel(private val context: Context) : ViewModel() {
             // 3. Filter for launchable apps: If it's a system app but has no drawer icon, don't count it
             val isSystemApp = (app.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0 ||
                     (app.flags and android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-
-            val launchIntent = packageManager.getLaunchIntentForPackage(app.packageName)
-            if (isSystemApp && launchIntent == null) {
-                continue
-            }
 
             // Increment the counts using your existing variables
             if (!isSystemApp) {
