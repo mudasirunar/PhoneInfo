@@ -66,7 +66,7 @@ PhoneInfo is engineered using a clean **MVVM (Model-View-ViewModel)** architectu
 ## ⚙️ Installation Steps
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/yourusername/PhoneInfo.git
+   git clone https://github.com/mudasirunar/PhoneInfo.git
    ```
 2. **Open in Android Studio:**
    Launch Android Studio and select `File > Open`, then navigate to the cloned `PhoneInfo` directory.
